@@ -1,49 +1,13 @@
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-}
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
   provider = "prisma-client-js"
 }
 
-model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String
-  role      Role     @default(MEMBER)
-  teamId    String?
-  team      Team?    @relation(fields: [teamId], references: [id])
-  bookings  Booking[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model Team {
-  id        String   @id @default(cuid())
-  name      String
-  slug      String   @unique
-  members   User[]
-  bookings  Booking[]
-  createdAt DateTime @default(now())
-}
-
-model Booking {
-  id          String        @id @default(cuid())
-  title       String
-  description String?
-  startTime   DateTime
-  endTime     DateTime
-  status      BookingStatus @default(CONFIRMED)
-  visibility  Visibility    @default(PUBLIC)
-  recurring   Boolean       @default(false)
-  recurrenceRule String?
-  userId      String
-  user        User          @relation(fields: [userId], references: [id])
-  teamId      String?
-  team        Team?         @relation(fields: [teamId], references: [id])
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 enum Role {
@@ -52,13 +16,70 @@ enum Role {
 }
 
 enum BookingStatus {
+  PENDING
   CONFIRMED
   CANCELLED
-  PENDING
 }
 
 enum Visibility {
   PUBLIC
   PRIVATE
   TEAM_ONLY
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  role      Role     @default(MEMBER)
+  teamId    String?
+  team      Team?    @relation("TeamMembers", fields: [teamId], references: [id])
+  bookings  Booking[]
+  createdAt DateTime @default(now())
+  
+  // Calendar token ownership (IDOR fix)
+  ownedCalendarTokens Team[] @relation("TeamCalendarToken")
+  
+  @@index([teamId])
+}
+
+model Team {
+  id        String    @id @default(cuid())
+  name      String
+  slug      String    @unique
+  members   User[]    @relation("TeamMembers")
+  bookings  Booking[]
+  createdAt DateTime  @default(now())
+  
+  // Calendar subscription token fields (Security: IDOR protection)
+  calendarTokenHash String?   @unique
+  tokenOwnerId      String?
+  tokenOwner        User?     @relation("TeamCalendarToken", fields: [tokenOwnerId], references: [id])
+  tokenCreatedAt    DateTime?
+  
+  @@index([calendarTokenHash])
+  @@index([slug])
+}
+
+model Booking {
+  id              String        @id @default(cuid())
+  title           String
+  description     String?
+  startTime       DateTime
+  endTime         DateTime
+  status          BookingStatus @default(PENDING)
+  visibility      Visibility    @default(PUBLIC)
+  recurring       Boolean       @default(false)
+  recurrenceRule  String?
+  userId          String
+  user            User          @relation(fields: [userId], references: [id])
+  teamId          String?
+  team            Team?         @relation(fields: [teamId], references: [id])
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  
+  // Calendar query optimization indexes
+  @@index([teamId, status, startTime])
+  @@index([visibility, startTime])
+  @@index([userId, startTime])
 }
