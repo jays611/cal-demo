@@ -8,7 +8,7 @@
  * - Finding #7 (LOW): DoS via recursive RRULE
  */
 
-import { Booking, Team } from "@prisma/client";
+import { Booking, Team, User } from "@prisma/client";
 import { GenerateCalendarOptions } from "./ics-types";
 import {
   escapeICS,
@@ -19,10 +19,7 @@ import {
 } from "./ics-utils";
 
 type BookingWithUser = Booking & {
-  user: {
-    name: string;
-    email: string;
-  };
+  user: Pick<User, "name" | "email">;
 };
 
 /**
@@ -33,12 +30,40 @@ type BookingWithUser = Booking & {
  * @param team - Team information for calendar metadata
  * @param options - Generation options including userId for privacy filtering
  * @returns RFC 5545 compliant ICS string
+ * @throws {TypeError} If input validation fails
+ * @throws {RangeError} If team name exceeds maximum length
  */
 export function generateCalendar(
   bookings: BookingWithUser[],
   team: { id: string; name: string; slug: string },
   options: GenerateCalendarOptions
 ): string {
+  // Validate inputs
+  if (!Array.isArray(bookings)) {
+    throw new TypeError("bookings must be an array");
+  }
+  
+  if (!team?.name || typeof team.name !== "string") {
+    throw new TypeError("team.name is required and must be a string");
+  }
+  
+  if (team.name.length > 200) {
+    throw new RangeError("team.name exceeds maximum length of 200 characters");
+  }
+  
+  if (!options?.userId || typeof options.userId !== "string") {
+    throw new TypeError("options.userId is required and must be a string");
+  }
+  
+  // Validate each booking has required user information
+  for (const booking of bookings) {
+    if (!booking.user?.name || !booking.user?.email) {
+      throw new TypeError(
+        `Booking ${booking.id} missing required user information (name, email)`
+      );
+    }
+  }
+
   const lines: string[] = [];
 
   // VCALENDAR header (RFC 5545 Section 3.6)
@@ -52,7 +77,13 @@ export function generateCalendar(
 
   // VEVENT components - one per booking
   for (const booking of bookings) {
-    lines.push(...generateVEvent(booking, options));
+    try {
+      lines.push(...generateVEvent(booking, options));
+    } catch (error) {
+      // Log error but continue processing other bookings
+      console.error(`Error generating VEVENT for booking ${booking.id}:`, error);
+      // Skip this booking and continue with others
+    }
   }
 
   // VCALENDAR footer
@@ -73,11 +104,21 @@ export function generateCalendar(
  * @param booking - Booking with user information
  * @param options - Generation options with userId for privacy check
  * @returns Array of ICS lines for the VEVENT
+ * @throws {Error} If booking data is invalid
  */
 function generateVEvent(
   booking: BookingWithUser,
   options: GenerateCalendarOptions
 ): string[] {
+  // Validate required fields
+  if (!booking.id || !booking.startTime || !booking.endTime) {
+    throw new Error("Booking missing required fields (id, startTime, endTime)");
+  }
+  
+  if (!(booking.startTime instanceof Date) || !(booking.endTime instanceof Date)) {
+    throw new Error("Booking startTime and endTime must be Date objects");
+  }
+
   const lines: string[] = [];
 
   // Privacy filtering (AR-9 - Finding #3: PRIVATE booking time disclosure)
@@ -104,7 +145,8 @@ function generateVEvent(
     // NO DESCRIPTION or ORGANIZER for private bookings viewed by non-owners
   } else {
     // Show full details for PUBLIC, TEAM_ONLY, or PRIVATE viewed by owner
-    lines.push(`SUMMARY:${escapeICS(booking.title)}`);
+    const title = booking.title || "Untitled Event";
+    lines.push(`SUMMARY:${escapeICS(title)}`);
 
     if (booking.description) {
       lines.push(`DESCRIPTION:${escapeICS(booking.description)}`);
@@ -124,6 +166,11 @@ function generateVEvent(
     const validRRule = validateRRule(booking.recurrenceRule);
     if (validRRule) {
       lines.push(`RRULE:${validRRule}`);
+    } else {
+      // Log warning but don't fail - just omit invalid RRULE
+      console.warn(
+        `Invalid RRULE for booking ${booking.id}: ${booking.recurrenceRule}`
+      );
     }
   }
 
