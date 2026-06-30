@@ -1,54 +1,63 @@
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-}
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
   provider = "prisma-client-js"
 }
 
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User model
 model User {
   id        String   @id @default(cuid())
+  name      String
   email     String   @unique
-  name      String
   role      Role     @default(MEMBER)
-  teamId    String?
   team      Team?    @relation(fields: [teamId], references: [id])
+  teamId    String?
   bookings  Booking[]
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model Team {
-  id        String   @id @default(cuid())
-  name      String
-  slug      String   @unique
-  members   User[]
-  bookings  Booking[]
-  createdAt DateTime @default(now())
-}
-
-model Booking {
-  id          String        @id @default(cuid())
-  title       String
-  description String?
-  startTime   DateTime
-  endTime     DateTime
-  status      BookingStatus @default(CONFIRMED)
-  visibility  Visibility    @default(PUBLIC)
-  recurring   Boolean       @default(false)
-  recurrenceRule String?
-  userId      String
-  user        User          @relation(fields: [userId], references: [id])
-  teamId      String?
-  team        Team?         @relation(fields: [teamId], references: [id])
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
 }
 
 enum Role {
   ADMIN
   MEMBER
+}
+
+// Team model
+model Team {
+  id            String   @id @default(cuid())
+  name          String
+  slug          String   @unique
+  calendarToken String?  @unique  // ⭐ NEW: Calendar subscription token
+  members       User[]
+  bookings      Booking[]
+  createdAt     DateTime @default(now())
+  
+  @@index([calendarToken])
+}
+
+// Booking model
+model Booking {
+  id              String        @id @default(cuid())
+  title           String
+  description     String?
+  startTime       DateTime
+  endTime         DateTime
+  status          BookingStatus @default(PENDING)
+  visibility      Visibility    @default(PUBLIC)
+  recurring       Boolean       @default(false)
+  recurrenceRule  String?
+  user            User          @relation(fields: [userId], references: [id])
+  userId          String
+  team            Team?         @relation(fields: [teamId], references: [id])
+  teamId          String?
+  createdAt       DateTime      @default(now())
+  
+  @@index([teamId, status, startTime])
 }
 
 enum BookingStatus {
